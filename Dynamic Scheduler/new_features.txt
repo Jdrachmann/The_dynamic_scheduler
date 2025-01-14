@@ -1,0 +1,6 @@
+1. Use movement patterns instead of exercises to decrease solution space
+2. Add general fatigue/CNS fatigue as a parameter to optimize on
+3. Change algorithm to also adjust individuals differently. Could be trying to switch around workout days.
+4. When only x days avaliable, decrease the indivdual creation to only include mutation on x days that can be used for working out
+5. Add feature that includes number of days you want to workout and not only avaliablility.
+6. Make optimization handle musclegroups such as calfs and side delts manually. They general impact on the scheduling is basically 0 and only increases solution space
