@@ -5,16 +5,23 @@ from deap import base, creator, tools
 from functools import partial
 import pandas as pd
 import os
+import random
+import itertools 
+
 
 os.chdir(os.path.dirname(os.path.abspath("Dynamic scheduler GA.py")))
 # Input values
-POPULATION_SIZE  = 2000
+POPULATION_SIZE  = 1000
 # Fysiological variables
 
 decay_rate = 0.5 # How fast does fatigue decay
 alpha = 0.2  # scale factor for how strongly fatigue reduces effective volume
 max_sets_per_day = 5 # Initialize for max sets pr exercise
-tæller = 0
+threshold_shuffle = 5 # After 5 tries with no improvement try shuffling the workout days
+shuffle_keep = 20 # How many of the best shuffles indivduals should be kept
+elite_size = 0  # Keep top 50 individuals in every generation
+indpb = 0.1 # probability of chance of sets
+
 # Reading input sheets
 file_path_folder = "Dynamic scheduler/"
 file_path_results = file_path_folder+"Results/"
@@ -327,12 +334,49 @@ def evaluate(individual):
     # Return only the fitness value for DEAP
     return (fitness_val,)
 
-# def mutUniformSets(individual, indpb=0.1):
-#     """Mutate each gene with probability indpb by assigning a random integer [0..max_sets_per_day]."""
-#     for i in range(len(individual)):
-#         if random.random() < indpb:
-#             individual[i] = random.randint(0, max_sets_per_day)
-#     return (individual,)
+
+def generate_combinations(pop,stagnant_generations,threshold,gen):
+    """
+    Generates all possible unique combinations for a list of lists based on shuffling the lists themselves.
+    
+    Parameters:
+    activities (list of lists): A list of lists where each inner list represents a set of activities.
+
+    Returns:
+    list: A list containing all unique combinations of the lists themselves.
+    """
+    # Trigger shuffle only if the threshold is reached
+    
+    if stagnant_generations == threshold or gen==1:
+        current_best = tools.selBest(pop, 1)[0]
+        current_best = reshape_chromosome(current_best)
+
+        shuffled_schedule = list(itertools.permutations(current_best))
+        shuffled_individual = create_individual_from_schedule(shuffled_schedule)
+        
+        # Flatten each sequence into a single list
+        flattened = []
+    
+        # Loop through each sequence in the shuffled individual
+        for index in range(int(len(shuffled_individual)/7)):
+            sliced_list = shuffled_individual[index*7:(index+1)*7]
+            sliced_list=create_individual_from_schedule(sliced_list)
+            
+            
+            flattened.append(sliced_list)
+        # Example to convert a raw list to a DEAP individual
+        pop_flattened = [creator.Individual(ind) for ind in flattened]
+       
+        # Calculate fitness after shuffling
+        fitnesses = list(map(toolbox.evaluate, flattened))
+        for ind, fit in zip(pop_flattened, fitnesses):
+            ind.fitness.values = fit
+
+        new_best_individuals = tools.selBest(pop_flattened, shuffle_keep)
+
+        return new_best_individuals
+    else:
+        return []
 
 def mutUniformSets(individual, workout_days, indpb=0.1):
     """Mutate only workout days by randomly adjusting sets between 2-5."""
@@ -345,6 +389,13 @@ def mutUniformSets(individual, workout_days, indpb=0.1):
             for exercise_index in range(NUM_EXERCISES):
                 individual[day_index * NUM_EXERCISES + exercise_index] = 0
     return (individual,)
+
+# def mutUniformSets(individual, indpb=0.1):
+#     """Mutate each gene with probability indpb by assigning a random integer [0..max_sets_per_day]."""
+#     for i in range(len(individual)):
+#         if random.random() < indpb:
+#             individual[i] = random.randint(0, max_sets_per_day)
+#     return (individual,)
 
 # ----------------------------
 # 4) Genetic Operators
@@ -364,7 +415,7 @@ toolbox.register("select", tools.selTournament, tournsize=3)
 
 
 
-def initialize_population_with_schedule(current_schedule, pop_size):
+def initialize_population_with_schedule(current_schedule, pop_size,indpb):
     """
     Initialize a population where the current schedule is included and others are randomly generated.
     """
@@ -374,6 +425,14 @@ def initialize_population_with_schedule(current_schedule, pop_size):
     # Generate the remaining individuals
     for _ in range(pop_size - 1):
         individual = toolbox.individual()
+        for day_index, day_name in enumerate(day_names):
+            if day_name in workout_days:  # Mutate only workout days
+                for exercise_index in range(NUM_EXERCISES):
+                    if random.random() < indpb:
+                        individual[day_index * NUM_EXERCISES + exercise_index] = random.randint(0, max_sets_per_day)
+            else:
+                for exercise_index in range(NUM_EXERCISES):
+                    individual[day_index * NUM_EXERCISES + exercise_index] = 0
         population.append(individual)
     
     return population
@@ -381,9 +440,8 @@ def initialize_population_with_schedule(current_schedule, pop_size):
 
 def main(current_schedule):
     # random.seed(42)
-    elite_size = 0  # Keep top 50 individuals in every generation
     # Create initial population
-    pop = initialize_population_with_schedule(current_schedule, POPULATION_SIZE)
+    pop = initialize_population_with_schedule(current_schedule, POPULATION_SIZE,indpb)
 
     # Number of generations
     NGEN = 100
@@ -404,9 +462,18 @@ def main(current_schedule):
     MAX_NO_IMPROVE_GENS = 10        # after 10 gens of no improvement, we stop
 
     for gen in range(NGEN):
+        
         # Sort population by fitness and preserve the top individuals
         pop = sorted(pop, key=lambda ind: ind.fitness.values[0])
+
+        # shuffle shuffle
+
+        shuffles = generate_combinations(pop,no_improvement_count,threshold_shuffle, gen)
+
         elites = pop[:elite_size]
+        if shuffles:
+            elites += shuffles
+
         # 1) Selection
         offspring = toolbox.select(pop, len(pop))
         offspring = list(map(toolbox.clone, offspring))
@@ -431,7 +498,7 @@ def main(current_schedule):
             ind.fitness.values = fit
 
         # 5) Replace population
-        pop[:] = offspring + elites
+        pop[:] = offspring + elites 
 
         # 6) Get current best fitness
         current_best = min(ind.fitness.values[0] for ind in pop)
@@ -442,6 +509,9 @@ def main(current_schedule):
         else:
             no_improvement_count = 0
             best_so_far = current_best
+
+       
+
 
         # 8) If no improvement for many generations, stop early
         if no_improvement_count >= MAX_NO_IMPROVE_GENS:
