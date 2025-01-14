@@ -1,0 +1,4 @@
+1. Consider other optimization methods
+2. Build a database to store users info
+3. Build an app to which to use the model on
+4. Create a cloud connection to do the optimization
