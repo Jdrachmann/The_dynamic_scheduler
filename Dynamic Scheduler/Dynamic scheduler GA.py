@@ -2,21 +2,25 @@ import random
 import math
 import pdb
 from deap import base, creator, tools
+from functools import partial
 import pandas as pd
+import os
 
+os.chdir(os.path.dirname(os.path.abspath("Dynamic scheduler GA.py")))
 # Input values
-POPULATION_SIZE  = 50000
+POPULATION_SIZE  = 2000
 # Fysiological variables
 
 decay_rate = 0.5 # How fast does fatigue decay
-alpha = 0.1  # scale factor for how strongly fatigue reduces effective volume
+alpha = 0.2  # scale factor for how strongly fatigue reduces effective volume
 max_sets_per_day = 5 # Initialize for max sets pr exercise
 tæller = 0
 # Reading input sheets
-file_path_schedule = "DayAvailability.xlsx"
-df_exer = pd.read_excel("ExerciseInfo.xlsx", sheet_name=0)
-file_workout_history = "WorkoutHistory.xlsx"
-
+file_path_folder = "Dynamic scheduler/"
+file_path_results = file_path_folder+"Results/"
+file_path_schedule = file_path_folder+"DayAvailability.xlsx"
+file_workout_history = file_path_folder+"WorkoutHistory.xlsx"
+df_exer = pd.read_excel(file_path_folder+"ExerciseInfo.xlsx", sheet_name=0)
 
 def load_workout_history(file_path):
     """
@@ -89,6 +93,14 @@ target_volume = workout_data['desired_volume']
 day_names = workout_data['days']
 exercises = workout_data['exercises']
 sets_by_day = workout_data['sets_by_day']
+sets_by_day_ori_sched = sets_by_day 
+
+workout_days = list()
+for index, (key, value) in enumerate(time_available.items()):
+    if value > 0:
+        workout_days.append(key)
+
+
 
 current_schedule = create_individual_from_schedule(sets_by_day)
 
@@ -310,19 +322,29 @@ def evaluate(individual):
     total_deviation = calculate_deviation(achieved_vol)
 
     # Step 6: Fitness = deviation + penalty
-    fitness_val = total_deviation**2 + penalty - total_effective_volume
+    fitness_val = total_deviation**3 + penalty - total_effective_volume**1.5
 
     # Return only the fitness value for DEAP
     return (fitness_val,)
 
-def mutUniformSets(individual, indpb=0.1):
-    """Mutate each gene with probability indpb by assigning a random integer [0..max_sets_per_day]."""
-    for i in range(len(individual)):
-        if random.random() < indpb:
-            individual[i] = random.randint(0, max_sets_per_day)
+# def mutUniformSets(individual, indpb=0.1):
+#     """Mutate each gene with probability indpb by assigning a random integer [0..max_sets_per_day]."""
+#     for i in range(len(individual)):
+#         if random.random() < indpb:
+#             individual[i] = random.randint(0, max_sets_per_day)
+#     return (individual,)
+
+def mutUniformSets(individual, workout_days, indpb=0.1):
+    """Mutate only workout days by randomly adjusting sets between 2-5."""
+    for day_index, day_name in enumerate(day_names):
+        if day_name in workout_days:  # Mutate only workout days
+            for exercise_index in range(NUM_EXERCISES):
+                if random.random() < indpb:
+                    individual[day_index * NUM_EXERCISES + exercise_index] = random.randint(0, max_sets_per_day)
+        else:
+            for exercise_index in range(NUM_EXERCISES):
+                individual[day_index * NUM_EXERCISES + exercise_index] = 0
     return (individual,)
-
-
 
 # ----------------------------
 # 4) Genetic Operators
@@ -336,7 +358,8 @@ toolbox.register("mate", tools.cxTwoPoint)
 toolbox.register("evaluate", evaluate)
 
 # number for set for a given day for an exercise
-toolbox.register("mutate", mutUniformSets, indpb=0.1)   
+toolbox.register("mutate", partial(mutUniformSets, workout_days=workout_days, indpb=0.1), indpb=0.1)
+# toolbox.register("mutate", mutUniformSets, indpb=0.1)    
 toolbox.register("select", tools.selTournament, tournsize=3)
 
 
@@ -358,7 +381,7 @@ def initialize_population_with_schedule(current_schedule, pop_size):
 
 def main(current_schedule):
     # random.seed(42)
-    elite_size = 50  # Keep top 50 individuals in every generation
+    elite_size = 0  # Keep top 50 individuals in every generation
     # Create initial population
     pop = initialize_population_with_schedule(current_schedule, POPULATION_SIZE)
 
@@ -472,8 +495,19 @@ def save_schedule_to_excel(best_individual, days, exercises, muscles, filename="
 
     # Prepare DataFrames for Export
     # 1. Sets Performed
-    sets_df = pd.DataFrame(sets_by_day, index=days, columns=exercises)
-    sets_df.index.name = "Day"
+    # Prepare DataFrame for Export (Days as Rows)
+    all_data = []
+
+    # Add Original Schedule
+    for i, day in enumerate(days):
+        all_data.append([f"{day} (Original)"] + sets_by_day_ori_sched[i])
+
+    # Add Optimized Schedule
+    for i, day in enumerate(days):
+        all_data.append([f"{day} (Optimized)"] + sets_by_day[i])
+    
+    # Convert to DataFrame
+    sets_combined = pd.DataFrame(all_data, columns=["Day"] + exercises)
 
     # 2. Effective Volume Per Day
     effective_volume_df = pd.DataFrame(effective_volume, index=[days[i] for i in range(len(days))])
@@ -503,15 +537,15 @@ def save_schedule_to_excel(best_individual, days, exercises, muscles, filename="
     })
 
     # Exporting DataFrames to Excel
-    with pd.ExcelWriter(filename) as writer:
-        sets_df.to_excel(writer, sheet_name="Sets_Performed")
+    with pd.ExcelWriter(file_path_results+filename) as writer:
+        sets_combined.to_excel(writer, sheet_name="Sets_Performed")
         effective_volume_df.to_excel(writer, sheet_name="Effective_Volume")
         fatigue_df.to_excel(writer, sheet_name="Fatigue")
         time_df.to_excel(writer, sheet_name="Time_Used_vs_Available")
         achieved_volume_df.to_excel(writer, sheet_name="Achieved_vs_Target_Volume")
         summary_df.to_excel(writer, sheet_name="Summary")
 
-    print(f"✅ Schedule successfully saved to: {filename}")
+    print(f"✅ Schedule successfully saved to: {file_path_results+filename}")
 
 
 if __name__ == "__main__":
