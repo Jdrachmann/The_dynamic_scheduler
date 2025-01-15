@@ -1,5 +1,7 @@
 1. Use movement patterns instead of exercises to decrease solution space
+1b. Subsitute the movement patterns with selected exercises, for final schedule
 2. Add general fatigue/CNS fatigue as a parameter to optimize on
-5. Add feature that includes number of days you want to workout and not only avaliablility.
+5. Add feature that includes number of days you want to workout and not only avaliablility. IT randomly selects which days for now.
 6. Make optimization handle musclegroups such as calfs and side delts manually. They general impact on the scheduling is basically 0 and only increases solution space
 7. Better path convention
+8. Add feature to further diminish returns from performing more sets of the same exercise.

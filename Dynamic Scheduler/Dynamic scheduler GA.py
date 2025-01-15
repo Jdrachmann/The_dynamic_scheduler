@@ -11,7 +11,7 @@ import itertools
 
 os.chdir(os.path.dirname(os.path.abspath("Dynamic scheduler GA.py")))
 # Input values
-POPULATION_SIZE  = 5000
+POPULATION_SIZE  = 1000
 # Fysiological variables
 
 decay_rate = 0.5 # How fast does fatigue decay
@@ -70,6 +70,15 @@ def load_workout_schedule(file_path):
     # 3. Extract Exercises and Sets (Starting from Row 6)
     exercises = df.iloc[7, 1:].tolist()
     days = df.iloc[0, :7].tolist()
+    workout_day_counter = 0
+
+    for index, (day, value) in enumerate(time_available.items()):
+        if value > 0:
+            workout_day_counter = workout_day_counter + 1
+   
+    number_of_days = df.iloc[1,7:8].item()
+    if workout_day_counter < number_of_days:
+        number_of_days = workout_day_counter
     sets_by_day = df.iloc[7:, 1:].fillna(0).values.tolist()
     #Remove first list
     sets_by_day =  [[int(sets) if pd.notna(sets) else 0 for sets in row] for row in sets_by_day[1:]]
@@ -80,7 +89,8 @@ def load_workout_schedule(file_path):
         "desired_volume": desired_volume,
         "days": days,
         "exercises": exercises,
-        "sets_by_day": sets_by_day
+        "sets_by_day": sets_by_day,
+        "workout_days_ths_week": number_of_days
     }
 
     return exercise_data
@@ -92,6 +102,33 @@ def create_individual_from_schedule(current_schedule):
     # Flatten the current schedule into a list (chromosome format)
     return [sets for day in current_schedule for sets in day]
 
+def generate_workout_combinations(days_available, workouts_needed):
+    """
+    Generates all possible unique combinations of workout days based on the available days
+    and the number of workouts needed with a rest day between each workout.
+    
+    Parameters:
+    days_available (list): A list of days available for working out.
+    workouts_needed (int): The number of workout days desired.
+
+    Returns:
+    list: A list containing all unique combinations of workout days.
+    """
+    
+    valid_combinations = []
+    day_indices = list(range(len(days_available)))  # Convert days to numerical indices
+    for combination in itertools.combinations(day_indices, workouts_needed):
+        # Check for rest days between workouts
+        if all(combination[i+1] - combination[i] > 1 for i in range(len(combination) - 1)):
+            valid_combinations.append([days_available[j] for j in combination])  # Map back to days
+    
+    if not valid_combinations:
+        valid_combinations = [list(days_available[j] for j in combination) for combination in itertools.combinations(day_indices, workouts_needed)]
+
+    return random.choice(valid_combinations) if valid_combinations else None
+
+
+
 # Load schedule and avalability
 workout_data = load_workout_schedule(file_path_schedule)
 days_history, exercises_history, sets_by_day_history = load_workout_history(file_workout_history)
@@ -101,14 +138,17 @@ day_names = workout_data['days']
 exercises = workout_data['exercises']
 sets_by_day = workout_data['sets_by_day']
 sets_by_day_ori_sched = sets_by_day 
-
+workout_days_ths_week = workout_data['workout_days_ths_week']
 workout_days = list()
 for index, (key, value) in enumerate(time_available.items()):
     if value > 0:
         workout_days.append(key)
 
-
-
+# Function that select which days of the avaliable we should workout
+workout_days = generate_workout_combinations(workout_days,workout_days_ths_week)
+# If we want to work out more days than we have time avaliable. Limit the number of days to time avaliable.
+# if len(workout_days) > workout_days_ths_week:
+    
 current_schedule = create_individual_from_schedule(sets_by_day)
 
 print("Flattened Current Schedule:", current_schedule)
@@ -124,6 +164,7 @@ time_per_exercise = {}
 fatigue = {}
 contrib_dict = {}
 
+# Fatigue/volume dictionairy
 for i in exercises:
     row = df_exer.loc[df_exer['exercise'] == i]
     time_per_exercise[i] = row['time_per_set'].item()
@@ -141,13 +182,10 @@ for i in exercises:
 # -----------------------------
 # Diminishing-Returns Parameters
 # -----------------------------
-# For example, a saturating exponential:
 
 def diminishing_effective_sets(n_sets):
     """
-    If each new set is 2/3 of the previous, 
-    we sum: 1.0 + (2/3) + (2/3)^2 + ...
-    up to n_sets times.
+    Function that calculates the diminishing returns of performing a lot of sets in the same day
     """
     if n_sets <= 0:
         return 0.0
@@ -168,11 +206,6 @@ toolbox = base.Toolbox()
 toolbox.register("attr_sets", random.randint, 2, 5)  # Valid range for sets
 toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_sets, n=NUM_DAYS * NUM_EXERCISES)
 toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-
-
-# 2.1 Define fitness as a single objective ("Minimize" or "Maximize" in DEAP)
-# We'll define it as Minimizing "Total Deviation" from targets + Penalties
-
 
 # ----------------------------
 # 3) FITNESS EVALUATION
