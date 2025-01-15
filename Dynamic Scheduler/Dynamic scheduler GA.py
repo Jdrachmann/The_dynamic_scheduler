@@ -11,7 +11,7 @@ import itertools
 
 os.chdir(os.path.dirname(os.path.abspath("Dynamic scheduler GA.py")))
 # Input values
-POPULATION_SIZE  = 1000
+POPULATION_SIZE  = 5000
 # Fysiological variables
 
 decay_rate = 0.5 # How fast does fatigue decay
@@ -19,7 +19,7 @@ alpha = 0.2  # scale factor for how strongly fatigue reduces effective volume
 max_sets_per_day = 5 # Initialize for max sets pr exercise
 threshold_shuffle = 5 # After 5 tries with no improvement try shuffling the workout days
 shuffle_keep = 20 # How many of the best shuffles indivduals should be kept
-elite_size = 0  # Keep top 50 individuals in every generation
+elite_size = 10  # Keep top 50 individuals in every generation
 indpb = 0.1 # probability of chance of sets
 
 # Reading input sheets
