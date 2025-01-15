@@ -1,7 +1,7 @@
 1. Use DayAvability to input which exercises you usually do and which days("Optimal" Schedule)
         if the exercises are not included in the exercises info, enter the exercise along with fatigue/volume estimate
 2a. Input which days you can workout on and how much time
-2b. Input what your target volume is for the different muscle groups
+2b. Input what your target volume is for the different muscle groups and how many days you want to workout
 3. Run the GA model
 4. Look at your schedule in "Workout_schedule"
 5. Hopefully it is not fucking shit. But most likely
