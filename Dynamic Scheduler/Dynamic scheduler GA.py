@@ -6,28 +6,29 @@ from functools import partial
 import pandas as pd
 import os
 import random
-import itertools 
+import itertools
 
-
+# Can you see this?
 os.chdir(os.path.dirname(os.path.abspath("Dynamic scheduler GA.py")))
 # Input values
-POPULATION_SIZE  = 1000
+POPULATION_SIZE = 1000
 # Fysiological variables
 
-decay_rate = 0.5 # How fast does fatigue decay
+decay_rate = 0.5  # How fast does fatigue decay
 alpha = 0.2  # scale factor for how strongly fatigue reduces effective volume
-max_sets_per_day = 5 # Initialize for max sets pr exercise
-threshold_shuffle = 5 # After 5 tries with no improvement try shuffling the workout days
-shuffle_keep = 20 # How many of the best shuffles indivduals should be kept
+max_sets_per_day = 5  # Initialize for max sets pr exercise
+threshold_shuffle = 5  # After 5 tries with no improvement try shuffling the workout days
+shuffle_keep = 20  # How many of the best shuffles indivduals should be kept
 elite_size = 10  # Keep top 50 individuals in every generation
-indpb = 0.1 # probability of chance of sets
+indpb = 0.1  # probability of chance of sets
 
 # Reading input sheets
 file_path_folder = "Dynamic scheduler/"
-file_path_results = file_path_folder+"Results/"
-file_path_schedule = file_path_folder+"DayAvailability.xlsx"
-file_workout_history = file_path_folder+"WorkoutHistory.xlsx"
-df_exer = pd.read_excel(file_path_folder+"ExerciseInfo.xlsx", sheet_name=0)
+file_path_results = file_path_folder + "Results/"
+file_path_schedule = file_path_folder + "DayAvailability.xlsx"
+file_workout_history = file_path_folder + "WorkoutHistory.xlsx"
+df_exer = pd.read_excel(file_path_folder + "ExerciseInfo.xlsx", sheet_name=0)
+
 
 def load_workout_history(file_path):
     """
@@ -45,10 +46,11 @@ def load_workout_history(file_path):
     sets_by_day = df.iloc[:, 1:].values.tolist()
 
     # Convert NaN values to 0 for safety
-    sets_by_day =  [[int(sets) if pd.notna(sets) else 0 for sets in row] for row in sets_by_day[1:]]
-
+    sets_by_day = [[int(sets) if pd.notna(sets) else 0 for sets in row]
+                   for row in sets_by_day[1:]]
 
     return days, exercises, sets_by_day
+
 
 def load_workout_schedule(file_path):
     """
@@ -60,12 +62,13 @@ def load_workout_schedule(file_path):
     """
     # Load the Excel file
     df = pd.read_excel(file_path, header=None)
-    
+
     # 1. Extract Time Availability (First Row)
     time_available = dict(zip(df.iloc[0, :7], df.iloc[1, :7]))
 
     # 2. Extract Desired Volume (Row 3 and 4)
-    desired_volume = dict(zip(df.iloc[4, 0:].dropna(), df.iloc[5, 0:].dropna()))
+    desired_volume = dict(zip(df.iloc[4, 0:].dropna(), df.iloc[5,
+                                                               0:].dropna()))
 
     # 3. Extract Exercises and Sets (Starting from Row 6)
     exercises = df.iloc[7, 1:].tolist()
@@ -75,13 +78,14 @@ def load_workout_schedule(file_path):
     for index, (day, value) in enumerate(time_available.items()):
         if value > 0:
             workout_day_counter = workout_day_counter + 1
-   
-    number_of_days = df.iloc[1,7:8].item()
+
+    number_of_days = df.iloc[1, 7:8].item()
     if workout_day_counter < number_of_days:
         number_of_days = workout_day_counter
     sets_by_day = df.iloc[7:, 1:].fillna(0).values.tolist()
     #Remove first list
-    sets_by_day =  [[int(sets) if pd.notna(sets) else 0 for sets in row] for row in sets_by_day[1:]]
+    sets_by_day = [[int(sets) if pd.notna(sets) else 0 for sets in row]
+                   for row in sets_by_day[1:]]
 
     # Ensure the model uses only these exercises
     exercise_data = {
@@ -95,12 +99,14 @@ def load_workout_schedule(file_path):
 
     return exercise_data
 
+
 def create_individual_from_schedule(current_schedule):
     """
     Convert the current schedule into an individual.
     """
     # Flatten the current schedule into a list (chromosome format)
     return [sets for day in current_schedule for sets in day]
+
 
 def generate_workout_combinations(days_available, workouts_needed):
     """
@@ -114,30 +120,36 @@ def generate_workout_combinations(days_available, workouts_needed):
     Returns:
     list: A list containing all unique combinations of workout days.
     """
-    
+
     valid_combinations = []
-    day_indices = list(range(len(days_available)))  # Convert days to numerical indices
+    day_indices = list(range(
+        len(days_available)))  # Convert days to numerical indices
     for combination in itertools.combinations(day_indices, workouts_needed):
         # Check for rest days between workouts
-        if all(combination[i+1] - combination[i] > 1 for i in range(len(combination) - 1)):
-            valid_combinations.append([days_available[j] for j in combination])  # Map back to days
-    
+        if all(combination[i + 1] - combination[i] > 1
+               for i in range(len(combination) - 1)):
+            valid_combinations.append([days_available[j] for j in combination
+                                       ])  # Map back to days
+
     if not valid_combinations:
-        valid_combinations = [list(days_available[j] for j in combination) for combination in itertools.combinations(day_indices, workouts_needed)]
+        valid_combinations = [
+            list(days_available[j] for j in combination) for combination in
+            itertools.combinations(day_indices, workouts_needed)
+        ]
 
     return random.choice(valid_combinations) if valid_combinations else None
 
 
-
 # Load schedule and avalability
 workout_data = load_workout_schedule(file_path_schedule)
-days_history, exercises_history, sets_by_day_history = load_workout_history(file_workout_history)
+days_history, exercises_history, sets_by_day_history = load_workout_history(
+    file_workout_history)
 time_available = workout_data['time_available']
 target_volume = workout_data['desired_volume']
 day_names = workout_data['days']
 exercises = workout_data['exercises']
 sets_by_day = workout_data['sets_by_day']
-sets_by_day_ori_sched = sets_by_day 
+sets_by_day_ori_sched = sets_by_day
 workout_days_ths_week = workout_data['workout_days_ths_week']
 workout_days = list()
 for index, (key, value) in enumerate(time_available.items()):
@@ -145,10 +157,11 @@ for index, (key, value) in enumerate(time_available.items()):
         workout_days.append(key)
 
 # Function that select which days of the avaliable we should workout
-workout_days = generate_workout_combinations(workout_days,workout_days_ths_week)
+workout_days = generate_workout_combinations(workout_days,
+                                             workout_days_ths_week)
 # If we want to work out more days than we have time avaliable. Limit the number of days to time avaliable.
 # if len(workout_days) > workout_days_ths_week:
-    
+
 current_schedule = create_individual_from_schedule(sets_by_day)
 
 print("Flattened Current Schedule:", current_schedule)
@@ -168,7 +181,7 @@ contrib_dict = {}
 for i in exercises:
     row = df_exer.loc[df_exer['exercise'] == i]
     time_per_exercise[i] = row['time_per_set'].item()
-     # 2) Build a dict for muscle contributions automatically
+    # 2) Build a dict for muscle contributions automatically
     contrib_dict = {}
 
     # Loop over every muscle column
@@ -183,33 +196,41 @@ for i in exercises:
 # Diminishing-Returns Parameters
 # -----------------------------
 
+
 def diminishing_effective_sets(n_sets):
     """
     Function that calculates the diminishing returns of performing a lot of sets in the same day
     """
     if n_sets <= 0:
         return 0.0
-    
-    r = 2/3
+
+    r = 2 / 3
     return 1.0 * (1 - r**n_sets) / (1 - r)
+
+
 # ----------------------------
 # 2) GENETIC ALGORITHM SETUP
 # ----------------------------
 
-
 # Create the fitness and individual classes (if not already done)
-creator.create("FitnessMin", base.Fitness, weights=(-1.0,))  # Minimization problem
+creator.create("FitnessMin", base.Fitness,
+               weights=(-1.0, ))  # Minimization problem
 creator.create("Individual", list, fitness=creator.FitnessMin)
 
 # Ensure the toolbox is registered properly
 toolbox = base.Toolbox()
 toolbox.register("attr_sets", random.randint, 2, 5)  # Valid range for sets
-toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_sets, n=NUM_DAYS * NUM_EXERCISES)
+toolbox.register("individual",
+                 tools.initRepeat,
+                 creator.Individual,
+                 toolbox.attr_sets,
+                 n=NUM_DAYS * NUM_EXERCISES)
 toolbox.register("population", tools.initRepeat, list, toolbox.individual)
 
 # ----------------------------
 # 3) FITNESS EVALUATION
 # ----------------------------
+
 
 def reshape_chromosome(individual):
     """Convert a flat chromosome into a 2D structure (sets per day and exercise)."""
@@ -217,19 +238,19 @@ def reshape_chromosome(individual):
     idx = 0
 
     for i in range(NUM_DAYS):
-        day_slice = individual[idx : idx + NUM_EXERCISES]
+        day_slice = individual[idx:idx + NUM_EXERCISES]
         sets_by_day.append(day_slice)
         idx += NUM_EXERCISES
     return sets_by_day
 
+
 def calculate_daily_fatigue(sets_by_day):
     """Calculate the fatigue levels for each muscle on each day."""
-    
-    combined_sets_his_fut = [*sets_by_day_history, *sets_by_day]
-    daily_fatigue = [[float(0) for _ in muscles] for _ in range(NUM_DAYS*2)]
 
-    
-    for d in range(1, NUM_DAYS*2):  # Day 0 already initialized
+    combined_sets_his_fut = [*sets_by_day_history, *sets_by_day]
+    daily_fatigue = [[float(0) for _ in muscles] for _ in range(NUM_DAYS * 2)]
+
+    for d in range(1, NUM_DAYS * 2):  # Day 0 already initialized
         for mi, m in enumerate(muscles):
             # Fatigue decays from the previous day
             daily_fatigue[d][mi] = decay_rate * daily_fatigue[d - 1][mi]
@@ -239,7 +260,7 @@ def calculate_daily_fatigue(sets_by_day):
                 day_minus_1_sets = combined_sets_his_fut[d - 1][ei]
                 daily_fatigue[d][mi] += day_minus_1_sets * fatigue[e].get(m, 0)
 
-    daily_fatigue = daily_fatigue[7:14] # WOrk indexes skal automatiseres
+    daily_fatigue = daily_fatigue[7:14]  # WOrk indexes skal automatiseres
     return daily_fatigue
 
 
@@ -297,14 +318,14 @@ def calculate_time_penalty(sets_by_day):
             if sets > 0:
                 # Time for sets + additional setup time per performed exercise
                 time_used_today += sets * time_per_exercise[exercises[ei]]
-                time_used_today += time_per_exercise[exercises[ei]]  # Setup time added only if sets > 0
+                time_used_today += time_per_exercise[
+                    exercises[ei]]  # Setup time added only if sets > 0
 
         # Apply penalty for exceeding available time
         if time_used_today > time_available[day_name]:
             penalty += 100.0 * (time_used_today - time_available[day_name])
         elif time_available[day_name] - time_used_today < 5:
             penalty += 100.0 * (time_available[day_name] - time_used_today)
-        
 
         total_time_used += time_used_today
 
@@ -319,6 +340,7 @@ def calculate_deviation(achieved_vol):
         if diff > 0:
             total_deviation += abs(diff)
     return total_deviation
+
 
 def calculate_time_used_per_day(sets_by_day):
     """
@@ -340,19 +362,21 @@ def calculate_time_used_per_day(sets_by_day):
 
     return time_used_per_day
 
+
 def evaluate(individual):
     """
     Modularized evaluation function using helper functions.
     """
-  
+
     # Step 1: Reshape chromosome into day-by-day structure
     sets_by_day = reshape_chromosome(individual)
-    
+
     # Step 2: Calculate fatigue levels
     daily_fatigue = calculate_daily_fatigue(sets_by_day)
 
     # Step 3: Calculate effective and achieved volumes
-    achieved_vol, effective_vol = calculate_effective_volume(sets_by_day, daily_fatigue)
+    achieved_vol, effective_vol = calculate_effective_volume(
+        sets_by_day, daily_fatigue)
     total_effective_volume = sum(effective_vol.values())
 
     # Step 4: Apply time penalty
@@ -365,10 +389,10 @@ def evaluate(individual):
     fitness_val = total_deviation**3 + penalty - total_effective_volume**1.5
 
     # Return only the fitness value for DEAP
-    return (fitness_val,)
+    return (fitness_val, )
 
 
-def generate_combinations(pop,stagnant_generations,threshold,gen):
+def generate_combinations(pop, stagnant_generations, threshold, gen):
     """
     Generates all possible unique combinations for a list of lists based on shuffling the lists themselves.
     
@@ -379,27 +403,27 @@ def generate_combinations(pop,stagnant_generations,threshold,gen):
     list: A list containing all unique combinations of the lists themselves.
     """
     # Trigger shuffle only if the threshold is reached
-    
-    if stagnant_generations == threshold or gen==1:
+
+    if stagnant_generations == threshold or gen == 1:
         current_best = tools.selBest(pop, 1)[0]
         current_best = reshape_chromosome(current_best)
 
         shuffled_schedule = list(itertools.permutations(current_best))
-        shuffled_individual = create_individual_from_schedule(shuffled_schedule)
-        
+        shuffled_individual = create_individual_from_schedule(
+            shuffled_schedule)
+
         # Flatten each sequence into a single list
         flattened = []
-    
+
         # Loop through each sequence in the shuffled individual
-        for index in range(int(len(shuffled_individual)/7)):
-            sliced_list = shuffled_individual[index*7:(index+1)*7]
-            sliced_list=create_individual_from_schedule(sliced_list)
-            
-            
+        for index in range(int(len(shuffled_individual) / 7)):
+            sliced_list = shuffled_individual[index * 7:(index + 1) * 7]
+            sliced_list = create_individual_from_schedule(sliced_list)
+
             flattened.append(sliced_list)
         # Example to convert a raw list to a DEAP individual
         pop_flattened = [creator.Individual(ind) for ind in flattened]
-       
+
         # Calculate fitness after shuffling
         fitnesses = list(map(toolbox.evaluate, flattened))
         for ind, fit in zip(pop_flattened, fitnesses):
@@ -411,17 +435,21 @@ def generate_combinations(pop,stagnant_generations,threshold,gen):
     else:
         return []
 
+
 def mutUniformSets(individual, workout_days, indpb=0.1):
     """Mutate only workout days by randomly adjusting sets between 2-5."""
     for day_index, day_name in enumerate(day_names):
         if day_name in workout_days:  # Mutate only workout days
             for exercise_index in range(NUM_EXERCISES):
                 if random.random() < indpb:
-                    individual[day_index * NUM_EXERCISES + exercise_index] = random.randint(0, max_sets_per_day)
+                    individual[day_index * NUM_EXERCISES +
+                               exercise_index] = random.randint(
+                                   0, max_sets_per_day)
         else:
             for exercise_index in range(NUM_EXERCISES):
                 individual[day_index * NUM_EXERCISES + exercise_index] = 0
-    return (individual,)
+    return (individual, )
+
 
 # def mutUniformSets(individual, indpb=0.1):
 #     """Mutate each gene with probability indpb by assigning a random integer [0..max_sets_per_day]."""
@@ -434,21 +462,20 @@ def mutUniformSets(individual, workout_days, indpb=0.1):
 # 4) Genetic Operators
 # ----------------------------
 
-
-
 # 2.3 Structure initializers
 # We can use built-in DEAP tools: mate=tools.cxTwoPoint, mutate=tools.mutUniformInt, etc.
 toolbox.register("mate", tools.cxTwoPoint)
 toolbox.register("evaluate", evaluate)
 
 # number for set for a given day for an exercise
-toolbox.register("mutate", partial(mutUniformSets, workout_days=workout_days, indpb=0.1), indpb=0.1)
-# toolbox.register("mutate", mutUniformSets, indpb=0.1)    
+toolbox.register("mutate",
+                 partial(mutUniformSets, workout_days=workout_days, indpb=0.1),
+                 indpb=0.1)
+# toolbox.register("mutate", mutUniformSets, indpb=0.1)
 toolbox.register("select", tools.selTournament, tournsize=3)
 
 
-
-def initialize_population_with_schedule(current_schedule, pop_size,indpb):
+def initialize_population_with_schedule(current_schedule, pop_size, indpb):
     """
     Initialize a population where the current schedule is included and others are randomly generated.
     """
@@ -462,19 +489,22 @@ def initialize_population_with_schedule(current_schedule, pop_size,indpb):
             if day_name in workout_days:  # Mutate only workout days
                 for exercise_index in range(NUM_EXERCISES):
                     if random.random() < indpb:
-                        individual[day_index * NUM_EXERCISES + exercise_index] = random.randint(0, max_sets_per_day)
+                        individual[day_index * NUM_EXERCISES +
+                                   exercise_index] = random.randint(
+                                       0, max_sets_per_day)
             else:
                 for exercise_index in range(NUM_EXERCISES):
                     individual[day_index * NUM_EXERCISES + exercise_index] = 0
         population.append(individual)
-    
+
     return population
 
 
 def main(current_schedule):
     # random.seed(42)
     # Create initial population
-    pop = initialize_population_with_schedule(current_schedule, POPULATION_SIZE,indpb)
+    pop = initialize_population_with_schedule(current_schedule,
+                                              POPULATION_SIZE, indpb)
 
     # Number of generations
     NGEN = 100
@@ -491,17 +521,18 @@ def main(current_schedule):
     # ---------------------------
     best_so_far = float("inf")
     no_improvement_count = 0
-    IMPROVEMENT_THRESHOLD = 1e-4    # "small" improvement threshold
-    MAX_NO_IMPROVE_GENS = 10        # after 10 gens of no improvement, we stop
+    IMPROVEMENT_THRESHOLD = 1e-4  # "small" improvement threshold
+    MAX_NO_IMPROVE_GENS = 10  # after 10 gens of no improvement, we stop
 
     for gen in range(NGEN):
-        
+
         # Sort population by fitness and preserve the top individuals
         pop = sorted(pop, key=lambda ind: ind.fitness.values[0])
 
         # shuffle shuffle
 
-        shuffles = generate_combinations(pop,no_improvement_count,threshold_shuffle, gen)
+        shuffles = generate_combinations(pop, no_improvement_count,
+                                         threshold_shuffle, gen)
 
         elites = pop[:elite_size]
         if shuffles:
@@ -531,7 +562,7 @@ def main(current_schedule):
             ind.fitness.values = fit
 
         # 5) Replace population
-        pop[:] = offspring + elites 
+        pop[:] = offspring + elites
 
         # 6) Get current best fitness
         current_best = min(ind.fitness.values[0] for ind in pop)
@@ -543,15 +574,16 @@ def main(current_schedule):
             no_improvement_count = 0
             best_so_far = current_best
 
-       
-
-
         # 8) If no improvement for many generations, stop early
         if no_improvement_count >= MAX_NO_IMPROVE_GENS:
-            print(f"No improvement for {MAX_NO_IMPROVE_GENS} generations; stopping early.")
+            print(
+                f"No improvement for {MAX_NO_IMPROVE_GENS} generations; stopping early."
+            )
             break
 
-        print(f"Gen {gen}: best fitness = {current_best:.6f}, no_improvement_count = {no_improvement_count}")
+        print(
+            f"Gen {gen}: best fitness = {current_best:.6f}, no_improvement_count = {no_improvement_count}"
+        )
 
     # After evolution ends (either we break early or hit NGEN)
     best_ind = tools.selBest(pop, 1)[0]
@@ -562,7 +594,7 @@ def main(current_schedule):
     best_solution = []
     idx = 0
     for i in range(NUM_DAYS):
-        day_slice = best_ind[idx : idx + NUM_EXERCISES]
+        day_slice = best_ind[idx:idx + NUM_EXERCISES]
         best_solution.append(day_slice)
         idx += NUM_EXERCISES
 
@@ -575,13 +607,16 @@ def main(current_schedule):
         if day_plan:
             print(f"{d_name}: {', '.join(day_plan)}")
 
-     # Return the best individual and metrics
+    # Return the best individual and metrics
     best_ind = tools.selBest(pop, 1)[0]
     return best_ind
-    
 
 
-def save_schedule_to_excel(best_individual, days, exercises, muscles, filename="workout_schedule.xlsx"):
+def save_schedule_to_excel(best_individual,
+                           days,
+                           exercises,
+                           muscles,
+                           filename="workout_schedule.xlsx"):
     """
     Save the workout schedule results to an Excel file including:
     - Time used per day next to time availability
@@ -591,7 +626,8 @@ def save_schedule_to_excel(best_individual, days, exercises, muscles, filename="
     # Recalculate all metrics for the best individual
     sets_by_day = reshape_chromosome(best_individual)
     daily_fatigue = calculate_daily_fatigue(sets_by_day)
-    achieved_volume, effective_volume = calculate_effective_volume(sets_by_day, daily_fatigue)
+    achieved_volume, effective_volume = calculate_effective_volume(
+        sets_by_day, daily_fatigue)
     penalty, total_time_used = calculate_time_penalty(sets_by_day)
     time_used_per_day = calculate_time_used_per_day(sets_by_day)
     total_deviation = calculate_deviation(effective_volume)
@@ -608,12 +644,13 @@ def save_schedule_to_excel(best_individual, days, exercises, muscles, filename="
     # Add Optimized Schedule
     for i, day in enumerate(days):
         all_data.append([f"{day} (Optimized)"] + sets_by_day[i])
-    
+
     # Convert to DataFrame
     sets_combined = pd.DataFrame(all_data, columns=["Day"] + exercises)
 
     # 2. Effective Volume Per Day
-    effective_volume_df = pd.DataFrame(effective_volume, index=[days[i] for i in range(len(days))])
+    effective_volume_df = pd.DataFrame(
+        effective_volume, index=[days[i] for i in range(len(days))])
     effective_volume_df.index.name = "Day"
 
     # 3. Fatigue Levels
@@ -629,8 +666,9 @@ def save_schedule_to_excel(best_individual, days, exercises, muscles, filename="
     time_df.index.name = "Day"
 
     # 5. Achieved Volume and Target Volume
-    achieved_volume_df = pd.DataFrame([achieved_volume, target_volume], 
-                                      index=["Achieved Volume", "Target Volume"])
+    achieved_volume_df = pd.DataFrame(
+        [achieved_volume, target_volume],
+        index=["Achieved Volume", "Target Volume"])
 
     # 6. Penalty and Total Time Used Summary
     summary_df = pd.DataFrame({
@@ -640,24 +678,22 @@ def save_schedule_to_excel(best_individual, days, exercises, muscles, filename="
     })
 
     # Exporting DataFrames to Excel
-    with pd.ExcelWriter(file_path_results+filename) as writer:
+    with pd.ExcelWriter(file_path_results + filename) as writer:
         sets_combined.to_excel(writer, sheet_name="Sets_Performed")
         effective_volume_df.to_excel(writer, sheet_name="Effective_Volume")
         fatigue_df.to_excel(writer, sheet_name="Fatigue")
         time_df.to_excel(writer, sheet_name="Time_Used_vs_Available")
-        achieved_volume_df.to_excel(writer, sheet_name="Achieved_vs_Target_Volume")
+        achieved_volume_df.to_excel(writer,
+                                    sheet_name="Achieved_vs_Target_Volume")
         summary_df.to_excel(writer, sheet_name="Summary")
 
     print(f"✅ Schedule successfully saved to: {file_path_results+filename}")
 
 
 if __name__ == "__main__":
-    best_ind = main(current_schedule)  # Runs the GA and returns the best solution
-    save_schedule_to_excel(
-        best_individual=best_ind, 
-        days=day_names, 
-        exercises=exercises, 
-        muscles=muscles
-    )
-
-
+    best_ind = main(
+        current_schedule)  # Runs the GA and returns the best solution
+    save_schedule_to_excel(best_individual=best_ind,
+                           days=day_names,
+                           exercises=exercises,
+                           muscles=muscles)
