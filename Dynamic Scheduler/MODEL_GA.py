@@ -438,7 +438,7 @@ def generate_workout_plan(time_availability, preferred_exercises,
     min_sets_per_day = 2  # Added minimum sets constraint
     threshold_shuffle = 5
     shuffle_keep = 20
-    elite_size = 10
+    elite_size = 0
     indpb = 0.2  # Increased mutation probability for better exploration
 
     file_path_folder = "Dynamic scheduler/"
@@ -721,6 +721,29 @@ def generate_workout_plan(time_availability, preferred_exercises,
 
 
 if __name__ == "__main__":
+    time_available = {"Monday":60,"Tuesday":60,"Wednesday":0,"Thursday":60, "Friday":60, "Saturday":0,"Sunday":0}
+    selected_exercises = exercises = [
+    "Chest_Press",
+    "Pulldown",
+    "Curls",
+    "Tricep_Ext",
+    "Leg_Curls",
+    "Leg_Extensions",
+    "Calf_Raises",
+    "Lateral_Raises",
+    "Chest_Supported_Row",
+    "Chest_Fly"]
+    target_volume = {
+    "Chest": 8,
+    "Back": 8,
+    "Quads": 4,
+    "Hamstrings": 4,
+    "Bicep": 4,
+    "Tricep": 4,
+    "Lateral_Delt": 20,
+    "Front_Delt": 0,
+    "Glutes": 0,
+    "Calf": 4}
     result = generate_workout_plan(time_available, selected_exercises,
                                    target_volume, 4)
     logger.info(f"Generated workout plan: {result}")
