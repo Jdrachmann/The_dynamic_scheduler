@@ -11,11 +11,102 @@ import os
 import random
 import itertools
 import logging
+import pdb
+from sympy import symbols, Eq, solve
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+def save_schedule_to_excel(best_individual, exercises, muscles, filename, NUM_DAYS, NUM_EXERCISES,daily_initial_fatigue,recovery_pr_day,fatigue,alpha,day_names,time_per_exercise,target_volume_adjusted,workout_days_index):
+    """
+    Save the workout schedule results to an Excel file including:
+    - Time used per day next to time availability
+    - Target volume under achieved volume
+    """
+    
+    file_path_results = "Results/"
+    # Recalculate all metrics for the best individual
+    sets_by_day = reshape_chromosome(best_individual, NUM_DAYS, NUM_EXERCISES)
+    daily_fatigue = calculate_daily_fatigue(sets_by_day,daily_initial_fatigue,NUM_EXERCISES, NUM_DAYS,muscles, recovery_pr_day,exercises, fatigue)
+    achieved_volume, effective_volume = calculate_effective_volume(sets_by_day, daily_fatigue, NUM_DAYS, muscles,exercises, fatigue, alpha,workout_days_index)
+    penalty, total_time_used = calculate_time_penalty(sets_by_day, day_names, exercises, NUM_EXERCISES,time_per_exercise, time_available,workout_days_index)
+    time_used_per_day = calculate_time_used_per_day(sets_by_day, day_names, exercises,NUM_EXERCISES, time_per_exercise)
+    total_deviation = calculate_deviation(achieved_volume, muscles, target_volume_adjusted)
+
+    # Prepare DataFrames for Export
+    # 1. Sets Performed
+    # Prepare DataFrame for Export (Days as Rows)
+    all_data = []
+
+
+    # Add Optimized Schedule
+    for i, day in enumerate(day_names):
+        all_data.append([f"{day} (Optimized)"] + sets_by_day[i])
+    
+    # Convert to DataFrame
+    sets_combined = pd.DataFrame(all_data, columns=["Day"] + exercises)
+    
+    # 2. Effective Volume Per Day
+    effective_volume_df = pd.DataFrame(effective_volume, index=day_names)
+    effective_volume_df.index.name = "Day"
+    
+    # 3. Fatigue Levels
+    fatigue_df = pd.DataFrame(daily_fatigue, index=day_names, columns=muscles)
+    fatigue_df.index.name = "Day"
+
+    # 4. Time Used vs. Time Available
+    time_data = {
+        "Time Used (min)": time_used_per_day,
+        "Time Available (min)": [time_available[day] for day in day_names]
+    }
+    time_df = pd.DataFrame(time_data, index=day_names)
+    time_df.index.name = "Day"
+
+    # 5. Achieved Volume and Target Volume
+    achieved_volume_df = pd.DataFrame([achieved_volume, target_volume_adjusted], 
+                                      index=["Achieved Volume", "Target Volume"])
+
+    # 6. Penalty and Total Time Used Summary
+    summary_df = pd.DataFrame({
+        "Penalty": [penalty],
+        "Total Time Used": [total_time_used],
+        "Total Deviation": [total_deviation]
+    })
+ 
+    # Exporting DataFrames to Excel
+    with pd.ExcelWriter(file_path_results+filename) as writer:
+        sets_combined.to_excel(writer, sheet_name="Sets_Performed")
+        effective_volume_df.to_excel(writer, sheet_name="Effective_Volume")
+        fatigue_df.to_excel(writer, sheet_name="Fatigue")
+        time_df.to_excel(writer, sheet_name="Time_Used_vs_Available")
+        achieved_volume_df.to_excel(writer, sheet_name="Achieved_vs_Target_Volume")
+        summary_df.to_excel(writer, sheet_name="Summary")
+
+    print(f"✅ Schedule successfully saved to: {file_path_results+filename}")
+
+def load_exercise_bank(file_path_movement,file_path_exercises,selected_exercises):
+    """
+    Function to load exercise bank and movement patters
+    """
+
+    df_patterns_info = pd.read_excel(file_path_movement)
+    df_exercises = pd.read_excel(file_path_exercises)
+    filtered_df = df_exercises[df_exercises['Exercise'].isin(selected_exercises)]
+    filtered_df_joined = pd.merge(df_exercises,df_patterns_info, on="Movement_Pattern", how="inner").fillna(0)
+    return filtered_df_joined
+
+def load_volume_suggestions(file_path,volume_type, target_volume_adjusted):
+    """
+    Function that loads the excel file with suggested volumes
+    """
+   
+    if volume_type == 1:
+        return target_volume_adjusted
+    else:
+        df = pd.read_excel(file_path)
+        df = df[df['Type']==volume_type].iloc[:,1:].to_dict(orient='records')[0]
+        return df
 
 def load_workout_history(file_path):
     """
@@ -69,6 +160,33 @@ def load_workout_schedule(file_path):
         )
         raise
 
+def scale_target_volume_to_time(target_volume_adjusted, time_availability):
+    """
+    This function scales the target volume based on the time availability
+    """
+
+    total_time = 0
+    for key, value in time_available.items():
+        total_time += value
+
+    total_sets = 0
+    for key, value in target_volume_adjusted.items():
+        total_sets += value
+
+        # Define the variable
+    x = symbols('x')
+
+    # Define the equation
+    equation = Eq(total_sets * x, total_time)
+    # Solve the equation
+    solution = solve(equation, x)
+    
+    # Adjust total_sets based on total_time. X is 3.7 when balanced
+    balance_factor = solution[0]/3.7
+    for key, value in target_volume_adjusted.items():
+        target_volume_adjusted[key] = round(value * balance_factor,1)
+    
+    return target_volume_adjusted
 
 def create_individual_from_schedule(current_schedule):
     """
@@ -160,31 +278,37 @@ def reshape_sets_by_day_to_usable_format(sets_by_day, exercises, day_names):
 def diminishing_effective_sets(n_sets):
     """
     Function that calculates the diminishing returns of performing a lot of sets in the same day
+    Exponential half life diminish returns based on Chris beardsley
     """
 
     if n_sets <= 0:
         return 0.0
 
-    r = 2 / 3
-    return 1.0 * (1 - r**n_sets) / (1 - r)
+    if n_sets < 1:
+        return n_sets
+    
+    a=2.381
+    b=-1.7305
+    c=2.7307
+
+    return a + b/(2**(n_sets/c))
 
 
 def calculate_effective_volume(sets_by_day, daily_fatigue, NUM_DAYS, muscles,
-                               exercises, fatigue, alpha):
+                               exercises, fatigue, alpha,workout_days_index):
     """Calculate the effective volume considering fatigue and diminishing returns."""
-
+    
     achieved_vol = {m: 0.0 for m in muscles}
     effective_vol = {m: 0.0 for m in muscles}
-
-    for d in range(NUM_DAYS):
+    
+    for d in workout_days_index:
         for ei, e in enumerate(exercises):
-
             n_sets = sets_by_day[d][ei]
-
+            
             # Gather muscle fatigue factors
 
             muscle_factors = []
-
+            
             for m in muscles:
                 if fatigue[e].get(m, 0) > 0:
 
@@ -200,39 +324,52 @@ def calculate_effective_volume(sets_by_day, daily_fatigue, NUM_DAYS, muscles,
             exercise_factor = min(muscle_factors)
 
             # Distribute volume across muscles
+            
             for m in muscles:
                 # Apply diminishing returns
-                eff_sets = diminishing_effective_sets(n_sets)
                 base_vol = fatigue[e].get(m, 0)
                 if base_vol > 0:
+                    eff_sets = diminishing_effective_sets(n_sets)
                     volume_gained = eff_sets * base_vol * exercise_factor
                     achieved_vol[m] += n_sets * base_vol
                     effective_vol[m] += volume_gained
-
+    
     return achieved_vol, effective_vol
 
+def calculate_deviation_effective(effective_vol, muscles, target_volume_adjusted):
+    """
+    Calculate the deviation from the target volume for each muscle.
+    This function calculates deviation based on effective volume
+    """
 
-def calculate_deviation(achieved_vol, muscles, target_volume):
+    total_deviation = 0.0
+    for m in muscles:
+        diff = target_volume_adjusted[m] - effective_vol[m]*2
+        if diff > 0.5:
+            total_deviation += abs(diff)
+    return total_deviation
+
+def calculate_deviation(achieved_vol, muscles, target_volume_adjusted):
     """Calculate the deviation from the target volume for each muscle."""
 
     total_deviation = 0.0
     for m in muscles:
-        diff = target_volume[m] - achieved_vol[m]
-        if diff > 0:
+        diff = target_volume_adjusted[m] - achieved_vol[m]
+        if diff > 0.5:
             total_deviation += abs(diff)
     return total_deviation
 
 
 def calculate_time_penalty(sets_by_day, day_names, exercises, NUM_EXERCISES,
-                           time_per_exercise, time_available):
+                           time_per_exercise, time_available,workout_days_index):
     """Calculate the time penalty for exceeding daily availability.
     Setup time is added only when an exercise is performed.
     """
     # logger.debug("Calculating time penalty.")
     penalty = 0
     total_time_used = 0
-
-    for d, day_name in enumerate(day_names):
+    
+    for d in workout_days_index:
         time_used_today = 0
 
         # Loop through each exercise and calculate time only if performed
@@ -242,13 +379,13 @@ def calculate_time_penalty(sets_by_day, day_names, exercises, NUM_EXERCISES,
                 # Time for sets + additional setup time per performed exercise
                 time_used_today += sets * time_per_exercise[exercises[ei]]
                 time_used_today += time_per_exercise[
-                    exercises[ei]]  # Setup time added only if sets > 0
+                    exercises[ei]]  # Setup time for exercises is equal to one set
 
         # Apply penalty for exceeding available time
-        if time_used_today > time_available[day_name]:
-            penalty += 100.0 * (time_used_today - time_available[day_name])
-        elif time_available[day_name] - time_used_today < 5:
-            penalty += 100.0 * (time_available[day_name] - time_used_today)
+        if time_used_today > time_available[day_names[d]]:
+            penalty += 100.0 * (time_used_today - time_available[day_names[d]])
+        # elif time_available[day_names[d]] - time_used_today < 5:
+        #     penalty += 100.0 * (time_available[day_names[d]] - time_used_today)
 
         total_time_used += time_used_today
 
@@ -264,7 +401,7 @@ def calculate_time_used_per_day(sets_by_day, day_names, exercises,
     # logger.debug("Calculating time used per day.")
     time_used_per_day = []
 
-    for d, day_name in enumerate(day_names):
+    for d in range(len(day_names)):
         time_used_today = 0
         for ei in range(NUM_EXERCISES):
             sets = sets_by_day[d][ei]
@@ -291,11 +428,10 @@ def mutUniformSets(individual,
             for exercise_index in range(NUM_EXERCISES):
                 if random.random() < indpb:
                     individual[day_index * NUM_EXERCISES +
-                               exercise_index] = random.randint(
-                        0, max_sets_per_day)
-        else:
-            for exercise_index in range(NUM_EXERCISES):
-                individual[day_index * NUM_EXERCISES + exercise_index] = 0
+                               exercise_index] = random.choice([0,2,3,4,5])
+        # else:
+        #     for exercise_index in range(NUM_EXERCISES):
+        #         individual[day_index * NUM_EXERCISES + exercise_index] = 0
     return (individual, )
 
 
@@ -332,62 +468,90 @@ def initialize_population_with_schedule(current_schedule, pop_size, indpb,
 
     return population
 
+def fatigue_factor(sets):
+    """
+    Transform the number of sets to a fatigue value
+    Uses a exponetial pattern based on Chris Beardsley
+    """
+    a=1
+    b=1.169
 
-def calculate_initial_fatigue(sets_by_day_history, NUM_DAYS, muscles, decay_rate, exercises_history, fatigue):
+    return a*sets**b
+
+def calculate_initial_fatigue(sets_by_day_history, NUM_DAYS, muscles, recovery_pr_day, exercises_history, fatigue):
     """
     Calculate the initial fatigue levels for the first 7 days based on history.
+     Recovery is set at a certain amount of sets pr day
 
     Args:
         sets_by_day_history (list): Historical sets performed.
         NUM_DAYS (int): Number of days to calculate fatigue for.
         muscles (list): List of muscles.
-        decay_rate (float): Fatigue decay rate per day.
+        recovery_pr_day (float): Fatigue decay rate per day.
         exercises (list): List of exercises.
         fatigue (dict): Fatigue contribution by exercise for each muscle.
 
     Returns:
         list: Initial fatigue levels for each muscle over the 7 days.
     """
-    schedule_empty = creator.Individual([0] * (NUM_DAYS * len(exercises_history)))
-    sets_by_day_empty = reshape_chromosome(schedule_empty, NUM_DAYS, len(exercises_history))
-    combined_sets_his_fut = [*sets_by_day_history, *sets_by_day_empty]
+    # OUT UNTUL SQL DATABASE WITH ACTUAL HISTORY IS CREATED
+    # schedule_empty = creator.Individual([0] * (NUM_DAYS * len(exercises_history)))
+    # sets_by_day_empty = reshape_chromosome(schedule_empty, NUM_DAYS, len(exercises_history))
+    # combined_sets_his_fut = [*sets_by_day_empty, *sets_by_day_empty]
+    # OUT UNTUL SQL DATABASE WITH ACTUAL HISTORY IS CREATED
+    # daily_fatigue = [[float(0) for _ in muscles] for _ in range(NUM_DAYS * 2)]
+    
+    # for d in range(1, NUM_DAYS * 2):  # Day 0 already initialized
+    #     for mi, m in enumerate(muscles):
+    #         # Fatigue decays from the previous day
 
-    daily_fatigue = [[float(0) for _ in muscles] for _ in range(NUM_DAYS * 2)]
+    #         daily_fatigue[d][mi] = re_calc_fatigue(daily_fatigue[d - 1][mi])
+    #         # Add fatigue contribution from previous day's sets
+    #         for ei, e in enumerate(exercises_history):
+    #             day_minus_1_sets = fatigue_factor(combined_sets_his_fut[d - 1][ei])
+    #             daily_fatigue[d][mi] += day_minus_1_sets * fatigue[e].get(m, 0)
 
-    for d in range(1, NUM_DAYS * 2):  # Day 0 already initialized
-        for mi, m in enumerate(muscles):
-            # Fatigue decays from the previous day
-            daily_fatigue[d][mi] = decay_rate * daily_fatigue[d - 1][mi]
-
-            # Add fatigue contribution from previous day's sets
-            for ei, e in enumerate(exercises_history):
-                day_minus_1_sets = combined_sets_his_fut[d - 1][ei]
-                daily_fatigue[d][mi] += day_minus_1_sets * fatigue[e].get(m, 0)
-
-    daily_initial_fatigue = daily_fatigue[7:14]  # WOrk indexes skal automatiseres
-
+    daily_initial_fatigue = [[float(0) for _ in muscles] for _ in range(NUM_DAYS)] # Placerholder
+    # daily_initial_fatigue = combined_sets_his_fut[7:14]  # WOrk indexes skal automatiseres
+    
     return daily_initial_fatigue
+
+def re_calc_fatigue(fatigue_level):
+    """
+    At higher fatigue levels the recovery is a little larger
+    At some point be muscle dependent
+    """
+    if fatigue_level < 2.5:
+        fatigue = 0
+    else:
+        fatigue = fatigue_level * 0.5
+    
+    return fatigue
 
 
 def calculate_daily_fatigue(sets_by_day, daily_initial_fatigue, NUM_EXERCISES,
-                            NUM_DAYS, muscles, decay_rate, exercises, fatigue):
-    """Calculate the fatigue levels for each muscle on each day."""
+                            NUM_DAYS, muscles, recovery_pr_day, exercises, fatigue):
+    """Calculate the fatigue levels for each muscle on each day.
+        Recovery is set at a certain amount of sets pr day
+    """
     # logger.debug("Calculating daily fatigue.")
 
-    daily_fatigue = [[float(0) for _ in muscles] for _ in range(NUM_DAYS * 2)]
+    daily_fatigue = [[float(0) for _ in muscles] for _ in range(NUM_DAYS)]
     for d in range(1, NUM_DAYS):  # Day 0 already initialized
         for mi, m in enumerate(muscles):
             # Fatigue decays from the previous day
-            daily_fatigue[d][mi] = decay_rate * daily_fatigue[d - 1][mi]
+            daily_fatigue[d][mi] = re_calc_fatigue(daily_fatigue[d - 1][mi])
 
             # Add fatigue contribution from previous day's sets
             for ei, e in enumerate(exercises):
-                day_minus_1_sets = sets_by_day[d - 1][ei]
+                
+                day_minus_1_sets = fatigue_factor(sets_by_day[d - 1][ei])
                 daily_fatigue[d][mi] += day_minus_1_sets * fatigue[e].get(m, 0)
+ 
+    result = [[f + i for f, i in zip(fatigue_row, initial_row)] for fatigue_row, initial_row in zip(daily_fatigue, daily_initial_fatigue)]
 
-    daily_fatigue_total = daily_initial_fatigue + daily_fatigue
 
-    return daily_fatigue_total
+    return result
 
 
 def generate_workout_combinations(days_available, workouts_needed):
@@ -427,24 +591,31 @@ def generate_workout_combinations(days_available, workouts_needed):
 
 
 def generate_workout_plan(time_availability, preferred_exercises,
-                          target_volume, days_to_workout):
+                          target_volume, volume_focus, days_to_workout):
     """
     Main function for generating a workout plan.
     """
-    POPULATION_SIZE = 10000
-    decay_rate = 0.5
-    alpha = 0.2
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    POPULATION_SIZE = 1000
+    recovery_pr_day = 2
+    alpha = 0.1
     max_sets_per_day = 5
     min_sets_per_day = 2  # Added minimum sets constraint
     threshold_shuffle = 5
     shuffle_keep = 20
-    elite_size = 0
+    elite_size = int(POPULATION_SIZE*0.05)
+    # pdb.set_trace()
     indpb = 0.2  # Increased mutation probability for better exploration
 
+    ################## File Paths
     file_path_folder = "Dynamic scheduler/"
     file_path_schedule = "DayAvailability.xlsx"
     file_workout_history = "WorkoutHistory.xlsx"
+    file_path_movement_pattern = "MovementPatterns.xlsx"
+    file_path_exercise_bank ="ExerciseBank.xlsx"
+    file_path_volume_suggestions = "VolumeSuggestions.xlsx"
 
+    target_volume_adjusted = load_volume_suggestions(file_path_volume_suggestions,volume_focus,target_volume)
     day_names = [
         'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
         'Sunday'
@@ -460,13 +631,18 @@ def generate_workout_plan(time_availability, preferred_exercises,
     workout_days = [
         key for key, value in time_available.items() if value > 0
     ]
-    workout_days = generate_workout_combinations(workout_days,
-                                                 days_to_workout)
+    
+    # Determine which days should be used for working out
+    workout_days = generate_workout_combinations(workout_days,days_to_workout)
+
+    # Find the index of workout days
+    workout_days_index = [day_names.index(day) for day in day_names if day in workout_days]
+    
 
     logger.info("Starting generate_workout_plan with inputs:")
     logger.info(f"Time availability: {time_availability}")
     logger.info(f"Preferred exercises: {preferred_exercises}")
-    logger.info(f"Target volume: {target_volume}")
+    logger.info(f"Target volume: {target_volume_adjusted}")
     logger.info(f"Days to workout: {days_to_workout}")
 
     creator.create("FitnessMin", base.Fitness, weights=(-1.0, ))
@@ -495,14 +671,25 @@ def generate_workout_plan(time_availability, preferred_exercises,
     sets_by_day = reshape_chromosome(current_schedule, NUM_DAYS, NUM_EXERCISES)
 
     try:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        
 
         # Load workout history
-        days_history, exercises_history, sets_by_day_history = load_workout_history(
-            file_workout_history)
+        days_history, exercises_history, sets_by_day_history = load_workout_history(file_workout_history)
+        df_exercises = load_exercise_bank(file_path_movement_pattern,file_path_exercise_bank,selected_exercises)
+       
         # Process exercises and build fatigue dictionary
-        df_exer = pd.read_excel("ExerciseInfo.xlsx", sheet_name=0)
-        muscles = list(df_exer.columns[2:])
+        columns = df_exercises.columns.tolist()
+        index_time_pr_exercise = columns.index("Time_pr_exercise")
+        muscles_all = columns[index_time_pr_exercise + 1:]
+
+        
+        # Reduce the volume dictionairy
+        target_volume_adjusted = {key: value for key, value in target_volume_adjusted.items() if value != 0}
+        # Adjusted the volume time match time valiable 
+        target_volume_adjusted = scale_target_volume_to_time(target_volume_adjusted,time_availability)
+        # Only keep muscles with volume. Do not consider the rest
+        muscles = [key for key, value in target_volume_adjusted.items()] #
+        
         logger.info(f"Detected muscle groups: {muscles}")
 
         time_per_exercise = {}
@@ -512,7 +699,7 @@ def generate_workout_plan(time_availability, preferred_exercises,
             logger.info(f"\nProcessing exercise: {exercise}")
 
             # Find exercise in database
-            row = df_exer.loc[df_exer['exercise'] == exercise]
+            row = df_exercises.loc[df_exercises['Exercise'] == exercise]
             if len(row) == 0:
                 logger.error(f"Exercise '{exercise}' not found in database!")
                 raise ValueError(
@@ -521,7 +708,7 @@ def generate_workout_plan(time_availability, preferred_exercises,
             logger.info(f"Found exercise data: {row.to_dict('records')[0]}")
 
             # Get time per set
-            time_per_exercise[exercise] = row['time_per_set'].iloc[0]
+            time_per_exercise[exercise] = row['Time_pr_exercise'].iloc[0]
             logger.info(f"Time per set: {time_per_exercise[exercise]}")
 
             # Build muscle contributions dictionary
@@ -529,7 +716,7 @@ def generate_workout_plan(time_availability, preferred_exercises,
             for muscle in muscles:
                 val = row[muscle].iloc[0]
                 if val > 0:
-                    contrib_dict[muscle.capitalize()] = val
+                    contrib_dict[muscle] = val
 
             fatigue[exercise] = contrib_dict
             logger.info(f"Fatigue contributions: {contrib_dict}")
@@ -541,7 +728,7 @@ def generate_workout_plan(time_availability, preferred_exercises,
         # Calculate initial fatigue levels
 
         daily_initial_fatigue = calculate_initial_fatigue(
-            sets_by_day_history, NUM_DAYS, muscles, decay_rate, exercises_history, fatigue)
+            sets_by_day_history, NUM_DAYS, muscles, recovery_pr_day, exercises_history, fatigue)
 
         def evaluate(individual):
             """
@@ -556,56 +743,56 @@ def generate_workout_plan(time_availability, preferred_exercises,
             daily_fatigue = calculate_daily_fatigue(sets_by_day,
                                                     daily_initial_fatigue,
                                                     NUM_EXERCISES, NUM_DAYS,
-                                                    muscles, decay_rate,
+                                                    muscles, recovery_pr_day,
                                                     exercises, fatigue)
 
+            
             # Step 3: Calculate effective and achieved volumes
             achieved_vol, effective_vol = calculate_effective_volume(
                 sets_by_day, daily_fatigue, NUM_DAYS, muscles, exercises,
-                fatigue, alpha)
+                fatigue, alpha,workout_days_index)
             total_effective_volume = sum(effective_vol.values())
 
             # Step 4: Apply time penalty
             penalty, total_time_used = calculate_time_penalty(
                 sets_by_day, day_names, exercises, NUM_EXERCISES,
-                time_per_exercise, time_available)
+                time_per_exercise, time_available,workout_days_index)
 
             # Step 5: Calculate deviation from target volumes
-            total_deviation = calculate_deviation(
-                achieved_vol, muscles, target_volume)
+            total_deviation = calculate_deviation_effective(
+                effective_vol, muscles, target_volume_adjusted)
 
             # Step 6: Add penalties for workout day distribution
-            distribution_penalty = 0
-            for day_index, day_name in enumerate(day_names):
-                day_sets = sets_by_day[day_index]
-                if day_name in workout_days:
-                    # Penalize workout days with too few exercises
-                    active_exercises = sum(1 for sets in day_sets if sets > 0)
-                    if active_exercises < 3:
-                        distribution_penalty += 1000 * (3 - active_exercises)
-                else:
-                    # Penalize non-workout days with exercises
-                    active_exercises = sum(1 for sets in day_sets if sets > 0)
-                    if active_exercises > 0:
-                        distribution_penalty += 1000 * active_exercises
+            # distribution_penalty = 0
+            # for day_index, day_name in enumerate(day_names):
+            #     day_sets = sets_by_day[day_index]
+            #     if day_name in workout_days:
+            #         # Penalize workout days with too few exercises
+            #         active_exercises = sum(1 for sets in day_sets if sets > 0)
+            #         if active_exercises < 3:
+            #             distribution_penalty += 1000 * (3 - active_exercises)
+            #     else:
+            #         # Penalize non-workout days with exercises
+            #         active_exercises = sum(1 for sets in day_sets if sets > 0)
+            #         if active_exercises > 0:
+            #             distribution_penalty += 1000 * active_exercises
 
             # Step 7: Add penalties for sets outside the allowed range
-            sets_penalty = 0
-            for day in sets_by_day:
-                for sets in day:
-                    if sets > 0 and sets < min_sets_per_day:
-                        sets_penalty += 100 * (min_sets_per_day - sets)
-                    elif sets > max_sets_per_day:
-                        sets_penalty += 100 * (sets - max_sets_per_day)
+            # sets_penalty = 0
+            # for day in sets_by_day:
+            #     for sets in day:
+            #         if sets > 0 and sets < min_sets_per_day:
+            #             sets_penalty += 100 * (min_sets_per_day - sets)
+            #         elif sets > max_sets_per_day:
+            #             sets_penalty += 100 * (sets - max_sets_per_day)
 
             # Step 8: Calculate final fitness with adjusted weights
             fitness_val = (
                 (total_deviation**2) +  # Volume deviation
-                penalty * 0.5 +  # Time penalty (reduced weight)
-                sets_penalty +  # Set range penalties
-                distribution_penalty -  # Workout distribution penalty
-                (total_effective_volume * 2)  # Increased reward for volume
-            )
+                penalty  # Time penalty (reduced weight)
+                # distribution_penalty -  # Workout distribution penalty
+                # (total_effective_volume**2)  # Increased reward for volume
+)
 
             return (fitness_val, )
 
@@ -629,7 +816,7 @@ def generate_workout_plan(time_availability, preferred_exercises,
             # Evolution parameters
             best_so_far = float("inf")
             no_improvement_count = 0
-            IMPROVEMENT_THRESHOLD = 1e-4
+            IMPROVEMENT_THRESHOLD = 0.1
             MAX_NO_IMPROVE_GENS = 10
 
             for gen in range(NGEN):
@@ -700,7 +887,8 @@ def generate_workout_plan(time_availability, preferred_exercises,
         best_ind = main(current_schedule)
         result_df = reshape_sets_by_day_to_usable_format(
             reshape_chromosome(best_ind, NUM_DAYS, NUM_EXERCISES), preferred_exercises, day_names)
-
+        
+        save_schedule_to_excel(best_ind, exercises, muscles, "workout_schedule.xlsx", NUM_DAYS, NUM_EXERCISES,daily_initial_fatigue,recovery_pr_day,fatigue,alpha,day_names,time_per_exercise,target_volume_adjusted,workout_days_index)
         # Convert DataFrame to dictionary format
         result_dict = {
             "Exercises": result_df["Exercises"].tolist(),
@@ -721,29 +909,34 @@ def generate_workout_plan(time_availability, preferred_exercises,
 
 
 if __name__ == "__main__":
-    time_available = {"Monday":60,"Tuesday":60,"Wednesday":0,"Thursday":60, "Friday":60, "Saturday":0,"Sunday":0}
+    time_available = {"Monday":60,"Tuesday":0,"Wednesday":0,"Thursday":60, "Friday":60, "Saturday":0,"Sunday":0}
     selected_exercises = exercises = [
-    "Chest_Press",
-    "Pulldown",
-    "Curls",
-    "Tricep_Ext",
-    "Leg_Curls",
-    "Leg_Extensions",
-    "Calf_Raises",
-    "Lateral_Raises",
-    "Chest_Supported_Row",
-    "Chest_Fly"]
+    "Bench Press (Dumbbell)",
+    "Incline Chest Press Machine",
+    "Pec Deck Machine",
+    "Reverse Fly Machine",
+    "Pull-Ups",
+    "Dumbbell Curls",
+    "Tricep Pushdowns (Cable)",
+    "Hip Thrust (Barbell)",
+    "Seated Calf Raises (Machine)",
+    "T-Bar Row",
+    "Cable Lateral Raises",
+    "Shoulder Press Machine",
+    "Leg Press Machine"]
     target_volume = {
     "Chest": 8,
     "Back": 8,
     "Quads": 4,
     "Hamstrings": 4,
     "Bicep": 4,
-    "Tricep": 4,
-    "Lateral_Delt": 20,
+    "Tricep": 8,
+    "Lateral_Delt": 4,
     "Front_Delt": 0,
     "Glutes": 0,
-    "Calf": 4}
+    "Calf": 4,
+    "Abs":0}
     result = generate_workout_plan(time_available, selected_exercises,
-                                   target_volume, 4)
+                                   target_volume, "Balanced",4)
+    
     logger.info(f"Generated workout plan: {result}")
